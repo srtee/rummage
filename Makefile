@@ -11,9 +11,13 @@ comma := ,
 BUILD_ARGS := $(if $(R_VERSION),--build-arg R_VERSION=$(R_VERSION)) $(if $(UVR_VERSION),--build-arg UVR_VERSION=$(UVR_VERSION))
 
 # Packages to bake into the app image (comma- or space-separated).
-# Example: make PACKAGES="terra,tidyverse,ggplot2"
-ifndef PACKAGES
-$(error Set PACKAGES, e.g.: make PACKAGES="terra,tidyverse")
+# - make PACKAGES="terra,tidyverse"  : bake exactly these packages
+# - make all-deps                    : bake everything in uvr.toml
+#   (incl. [dev-dependencies]); PACKAGES must be unset
+ifeq ($(strip $(PACKAGES)),)
+  ifeq ($(origin MAKECMDGOALS),undefined)
+    $(error Set PACKAGES, e.g.: make PACKAGES="terra,tidyverse")
+  endif
 endif
 
 # Stamp recording the last-built package list so `make` rebuilds the app
@@ -21,6 +25,13 @@ endif
 PACKAGES_STAMP := .packages.stamp
 
 all: $(APP_SIF)
+
+# Build the app image with BOTH [dependencies] and [dev-dependencies]
+# baked in. Requires a uvr.toml in the build context (PACKAGES mode
+# ignores dev-dependencies — it generates its own manifest).
+all-deps: $(APP_SIF)
+	apptainer build --fakeroot --force --build-arg 'PACKAGES=' \
+	    --build-arg ALL_DEPS=1 $(APP_SIF) $(APP_DEF)
 
 $(BASE_SIF): $(BASE_DEF)
 	apptainer build --fakeroot --force $(BUILD_ARGS) $@ $<

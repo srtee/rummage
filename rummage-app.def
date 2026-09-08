@@ -1,46 +1,57 @@
 Bootstrap: localimage
 From: rummage-base.sif
 
+%files
+    # Build context = the analysis project folder that owns uvr.toml.
+    # uvr.toml IS the environment spec: uvr resolves it at build time and
+    # writes uvr.lock inside the image. Extract that lockfile afterwards
+    # as the detailed reproducibility record.
+    uvr.toml /opt/uvr-project/uvr.toml
+
 %arguments
     # Comma- or space-separated CRAN package list, e.g. "terra,tidyverse,ggplot2".
     # Set from the Makefile (PACKAGES=...) or directly:
     #   apptainer build --build-arg 'PACKAGES=terra tidyverse' rummage-app.sif rummage-app.def
     PACKAGES=
+    # ALL_DEPS=1: also install [dev-dependencies] from uvr.toml (the
+    # Makefile sets this for `make all-deps`).
+    ALL_DEPS=
 
 %post
-    # rummage application image: R + uvr come from rummage-base.sif; this
-    # stage generates uvr.toml from the PACKAGES build arg, resolves it,
-    # and bakes the library. The working directory is bind-mounted at
-    # exec time; nothing is modified.
+    # rummage application image: R + uvr come from rummage-base.sif.
+    # Two modes: PACKAGES build arg generates a uvr.toml and installs it;
+    # empty PACKAGES uses the uvr.toml in the build context (%files).
+    # ALL_DEPS=1 installs [dev-dependencies] too.
     #
-    # Build:  make PACKAGES="terra,tidyverse"
+    # Build:  make PACKAGES="terra,tidyverse"   (or: make all-deps)
     # Run:    apptainer run --bind "$(pwd)":/work rummage-app.sif analysis.R
 
     PKG_LIST=$(echo "{{ PACKAGES }}" | tr ',' ' ')
-    if [ -z "${PKG_LIST}" ]; then
-        echo "ERROR: PACKAGES build arg is empty." >&2
-        exit 1
-    fi
-
-    # Generate uvr.toml. Reject anything that is not a valid R package
-    # name — a stray quote would corrupt the generated TOML.
-    for p in ${PKG_LIST}; do
-        case "$p" in
-            *[!A-Za-z0-9.]*) echo "ERROR: invalid package name: $p" >&2; exit 1 ;;
-        esac
-    done
     mkdir -p /opt/uvr-project
     cd /opt/uvr-project
-    {
-        echo "[project]"
-        echo 'name = "app"'
-        echo ""
-        echo "[dependencies]"
+    if [ -n "${PKG_LIST}" ]; then
+        # Generate uvr.toml from the package list. Reject anything that is
+        # not a valid R package name — a stray quote would corrupt the TOML.
         for p in ${PKG_LIST}; do
-            printf '%s = "*"\n' "$p"
+            case "$p" in
+                *[!A-Za-z0-9.]*) echo "ERROR: invalid package name: $p" >&2; exit 1 ;;
+            esac
         done
-    } > uvr.toml
+        {
+            echo "[project]"
+            echo 'name = "app"'
+            echo ""
+            echo "[dependencies]"
+            for p in ${PKG_LIST}; do
+                printf '%s = "*"\n' "$p"
+            done
+        } > uvr.toml
+    elif [ ! -f uvr.toml ]; then
+        echo "ERROR: PACKAGES is empty and no uvr.toml in the build context." >&2
+        exit 1
+    fi
     cat uvr.toml
+
 
     # `uvr lock` resolves uvr.toml against the base image's R and writes
     # /opt/uvr-project/uvr.lock; `uvr sync --frozen` installs exactly that
@@ -52,7 +63,12 @@ From: rummage-base.sif
     # build a day later or pin the package version in uvr.toml.
     export UVR_LIBRARY=/opt/uvr-r/library
     uvr lock
-    uvr sync --frozen --no-dev --install-system-deps
+    NO_DEV_FLAG=--no-dev
+    if [ -n "{{ ALL_DEPS }}" ]; then
+        # ALL_DEPS=1: install [dependencies] AND [dev-dependencies].
+        NO_DEV_FLAG=
+    fi
+    uvr sync --frozen ${NO_DEV_FLAG} --install-system-deps
 
     # Drop uvr's build-time download cache — the library is baked.
     rm -rf /root/.uvr
@@ -87,7 +103,6 @@ From: rummage-base.sif
         uvr|R|Rscript) exec "$@" ;;
         *) exec Rscript "$@" ;;
     esac
-
 %test
     set -e
     echo "uvr: $(uvr --version)"
