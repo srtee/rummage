@@ -1,0 +1,103 @@
+Bootstrap: docker
+From: ubuntu:24.04
+
+%arguments
+    # Build args. Unset = latest R (CRAN apt repo, current 4.x line) and
+    # latest uvr release. Pin with:
+    #   apptainer build --build-arg R_VERSION=4.5.1 --build-arg UVR_VERSION=v0.4.6 \
+    #       rummage-base.sif rummage-base.def
+    R_VERSION=
+    UVR_VERSION=
+
+%post
+    # uvr + R base image ("rummage-base"): Ubuntu 24.04, R, and the uvr
+    # binary. No packages are installed here — rummage-app.def builds on
+    # this image and bakes the package library from its uvr.toml.
+    #
+    # Build:  apptainer build rummage-base.sif rummage-base.def
+
+    export DEBIAN_FRONTEND=noninteractive
+    export LC_ALL=C.UTF-8
+
+    # Locale and timezone for the image (analysis outputs carry timestamps).
+    IMAGE_LOCALE="en_AU.UTF-8"
+    IMAGE_TZ="Australia/Brisbane"
+
+    # ---- base OS packages ----------------------------------------------
+    apt-get update -q && \
+        apt-get install -yq --no-install-recommends \
+            ca-certificates curl wget git fontconfig gnupg locales tzdata
+
+    # ---- locale + timezone ----------------------------------------------
+    sed -i "s/^# *${IMAGE_LOCALE}/${IMAGE_LOCALE}/" /etc/locale.gen
+    locale-gen
+    update-locale LANG="${IMAGE_LOCALE}" LC_ALL="${IMAGE_LOCALE}"
+    ln -sf "/usr/share/zoneinfo/${IMAGE_TZ}" /etc/localtime
+    echo "${IMAGE_TZ}" > /etc/timezone
+    # ---- R ---------------------------------------------------------------
+    PINNED_R_VERSION="{{ R_VERSION }}"
+    if [ -n "${PINNED_R_VERSION}" ]; then
+        # Pinned R: Posit prebuilt deb into /opt/R/$PINNED_R_VERSION (all
+        # recommended packages bundled, headers included — no r-base-dev).
+        R_DEB_URL="https://cdn.posit.co/r/ubuntu-2404/pkgs/r-${PINNED_R_VERSION}_1_amd64.deb"
+        curl -fsSL "${R_DEB_URL}" -o /tmp/r-pinned.deb
+        apt-get install -yq --no-install-recommends /tmp/r-pinned.deb
+        rm -f /tmp/r-pinned.deb
+        ln -s "/opt/R/${PINNED_R_VERSION}/bin/R" /usr/local/bin/R
+        ln -s "/opt/R/${PINNED_R_VERSION}/bin/Rscript" /usr/local/bin/Rscript
+        R --version | head -1
+    else
+        # Latest R: CRAN Ubuntu repo per the official instructions
+        # (https://cran.r-project.org/bin/linux/ubuntu/#root).
+        apt-get update -qq
+        apt-get install -yq --no-install-recommends software-properties-common dirmngr
+        wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc \
+            | tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc
+        add-apt-repository "deb https://cloud.r-project.org/bin/linux/ubuntu $(lsb_release -cs)-cran40/"
+        apt-get install -yq --no-install-recommends r-base
+        R --version | head -1
+    fi
+
+    # ---- uvr binary -------------------------------------------------------
+    PINNED_UVR_VERSION="{{ UVR_VERSION }}"
+    if [ -n "${PINNED_UVR_VERSION}" ]; then
+        pinned_tag="${PINNED_UVR_VERSION}"
+    else
+        pinned_tag="latest"
+    fi
+    curl -fsSL "https://github.com/nbafrank/uvr/releases/${pinned_tag}/download/uvr-x86_64-unknown-linux-gnu.tar.gz" \
+        -o /tmp/uvr.tar.gz
+    tar xzf /tmp/uvr.tar.gz -C /tmp && mv /tmp/uvr /usr/local/bin/uvr && chmod +x /usr/local/bin/uvr
+    rm -f /tmp/uvr.tar.gz
+    uvr --version
+
+%environment
+    export LC_ALL=en_AU.UTF-8
+    export LANG=en_AU.UTF-8
+    export TZ=Australia/Brisbane
+
+%test
+    set -e
+    echo "uvr: $(uvr --version)"
+    echo "R:   $(Rscript -e 'cat(R.version.string)')"
+    echo "R locale/TZ: $(Rscript -e 'cat(Sys.getlocale("LC_TIME"), "|", format(Sys.time(), "%Z %z"))')"
+
+%labels
+    Author APSIM Initiative
+    Title uvr + R base runtime
+    Description Ubuntu 24.04 + R + uvr binary; package library added by rummage-app.def
+    Version 1.0
+
+%help
+    uvr + R base image ("rummage-base")
+    ===================================
+    Ubuntu 24.04 + R (latest from the CRAN apt repo, or a pinned Posit
+    build) + the uvr binary. This image has NO R packages — build
+    rummage-app.sif from it to bake a package library.
+
+    Version pinning (both optional, default = latest):
+      apptainer build --build-arg R_VERSION=4.5.1 --build-arg UVR_VERSION=v0.4.6 \
+          rummage-base.sif rummage-base.def
+
+    BUILD:
+      apptainer build rummage-base.sif rummage-base.def

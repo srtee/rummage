@@ -1,0 +1,131 @@
+Bootstrap: localimage
+From: rummage-base.sif
+
+%arguments
+    # Comma- or space-separated CRAN package list, e.g. "terra,tidyverse,ggplot2".
+    # Set from the Makefile (PACKAGES=...) or directly:
+    #   apptainer build --build-arg 'PACKAGES=terra tidyverse' rummage-app.sif rummage-app.def
+    PACKAGES=
+
+%post
+    # rummage application image: R + uvr come from rummage-base.sif; this
+    # stage generates uvr.toml from the PACKAGES build arg, resolves it,
+    # and bakes the library. The working directory is bind-mounted at
+    # exec time; nothing is modified.
+    #
+    # Build:  make PACKAGES="terra,tidyverse"
+    # Run:    apptainer run --bind "$(pwd)":/work rummage-app.sif analysis.R
+
+    PKG_LIST=$(echo "{{ PACKAGES }}" | tr ',' ' ')
+    if [ -z "${PKG_LIST}" ]; then
+        echo "ERROR: PACKAGES build arg is empty." >&2
+        exit 1
+    fi
+
+    # Generate uvr.toml. Reject anything that is not a valid R package
+    # name — a stray quote would corrupt the generated TOML.
+    for p in ${PKG_LIST}; do
+        case "$p" in
+            *[!A-Za-z0-9.]*) echo "ERROR: invalid package name: $p" >&2; exit 1 ;;
+        esac
+    done
+    mkdir -p /opt/uvr-project
+    cd /opt/uvr-project
+    {
+        echo "[project]"
+        echo 'name = "app"'
+        echo ""
+        echo "[dependencies]"
+        for p in ${PKG_LIST}; do
+            printf '%s = "*"\n' "$p"
+        done
+    } > uvr.toml
+    cat uvr.toml
+
+    # `uvr lock` resolves uvr.toml against the base image's R and writes
+    # /opt/uvr-project/uvr.lock; `uvr sync --frozen` installs exactly that
+    # resolution into the baked library. --install-system-deps lets uvr
+    # apt-get any system libraries its rules detect (we are root, e.g.
+    # GDAL/PROJ/GEOS for terra).
+    # Binary installs come from P3M's noble channel; a brand-new CRAN
+    # release without a noble binary yet fails the sync loudly — rerun the
+    # build a day later or pin the package version in uvr.toml.
+    export UVR_LIBRARY=/opt/uvr-r/library
+    uvr lock
+    uvr sync --frozen --no-dev --install-system-deps
+
+    # Drop uvr's build-time download cache — the library is baked.
+    rm -rf /root/.uvr
+
+%environment
+    export UVR_LIBRARY=/opt/uvr-r/library
+    export R_LIBS_USER=/opt/uvr-r/library
+    # uvr's `run` isolation hides site libraries; this restores visibility
+    # of the baked library for `uvr run ...`.
+    export UVR_EXTRA_LIBS=/opt/uvr-r/library
+
+%runscript
+    if [ ! -d /work ]; then
+        echo "ERROR: /work not found." >&2
+        echo "Bind-mount your working directory:" >&2
+        echo "  apptainer run --bind \"\$(pwd)\":/work rummage-app.sif analysis.R" >&2
+        exit 1
+    fi
+    cd /work || exit 1
+
+    # Reconcile the lockfile: copy the baked one out if absent, warn on
+    # mismatch (the image remains the environment spec), stay silent on match.
+    if [ ! -f uvr.lock ]; then
+        cp /opt/uvr-project/uvr.lock uvr.lock
+    elif ! cmp -s uvr.lock /opt/uvr-project/uvr.lock; then
+        echo "WARNING: uvr.lock in /work differs from the environment baked into this image." >&2
+    fi
+
+    # Pass through explicit tool invocations; otherwise run Rscript with
+    # the baked library (R_LIBS_USER) as the default interpreter.
+    case "$1" in
+        uvr|R|Rscript) exec "$@" ;;
+        *) exec Rscript "$@" ;;
+    esac
+
+%test
+    set -e
+    echo "uvr: $(uvr --version)"
+    echo "R:   $(Rscript -e 'cat(R.version.string)')"
+    echo "Baked packages: $(Rscript -e 'cat(nrow(installed.packages(lib.loc="/opt/uvr-r/library")))')"
+
+%labels
+    Author APSIM Initiative
+    Title rummage application runtime
+    Description R + uvr base image with a baked package library; bind working dir at exec time
+    Version 3.3
+
+%help
+    rummage application image ("rummage-app")
+    =========================================
+    Built FROM rummage-base.sif (R + uvr). Adds a package library baked
+    at build time from the PACKAGES build arg. Packages install from P3M
+    pre-built binaries (noble channel); system deps are installed by
+    uvr's --install-system-deps. The generated uvr.lock lives at
+    /opt/uvr-project/uvr.lock.
+
+    BUILD (requires rummage-base.sif in the current directory):
+      make PACKAGES="terra,tidyverse,ggplot2"
+      # or directly:
+      apptainer build --build-arg 'PACKAGES=terra,tidyverse,ggplot2' \
+          rummage-app.sif rummage-app.def
+
+    RUN (working dir bound at exec time, never modified):
+      apptainer run  --bind "$(pwd)":/work rummage-app.sif analysis.R
+      apptainer exec --bind "$(pwd)":/work rummage-app.sif Rscript other-script.R
+      apptainer run  --bind "$(pwd)":/work rummage-app.sif uvr doctor
+
+    Extract the lockfile (the detailed record of what was resolved):
+      apptainer exec rummage-app.sif cat /opt/uvr-project/uvr.lock > uvr.lock
+
+    Interactive R console with the baked library:
+      apptainer run --bind "$(pwd)":/work rummage-app.sif R
+
+    At startup the runscript copies the baked uvr.lock into /work if
+    absent, or warns if the one there differs from the baked environment.
+    The library and R are read-only inside the SIF.

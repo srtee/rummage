@@ -1,0 +1,11 @@
+{
+  "positron.r.customBinaries": [
+    "/home/sherntee/.uvr/r-versions/4.5.3/bin/R"
+  ],
+  "positron.r.customRootFolders": [
+    "/home/sherntee/.uvr/r-versions"
+  ],
+  "positron.r.interpreters.default": "/home/sherntee/.uvr/r-versions/4.5.3/bin/R",
+  "r.rpath.linux": "/home/sherntee/.uvr/r-versions/4.5.3/bin/R",
+  "r.rterm.linux": "/home/sherntee/.uvr/r-versions/4.5.3/bin/R"
+}

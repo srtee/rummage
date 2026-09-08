@@ -1,0 +1,6 @@
+[project]
+name = "rummage"
+
+[dependencies]
+ggplot2 = "*"
+tidyverse = "*"

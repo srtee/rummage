@@ -1,0 +1,4 @@
+/.uvr/
+/.packages.stamp
+*.sif
+/example/mtcars-plot.png

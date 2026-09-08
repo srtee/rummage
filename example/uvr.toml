@@ -1,0 +1,6 @@
+[project]
+name = "rummage-example"
+
+[dependencies]
+terra = "*"
+ggplot2 = "*"
