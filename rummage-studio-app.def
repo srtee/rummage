@@ -90,8 +90,10 @@ From: rummage-studio-base.sif
     if [ $# -gt 0 ]; then
         exec rstudio-server "$@"
     fi
+    # --server-user root: rserver must stay root for PAM auth (see
+    # rummage-studio-base.def runscript comment).
     exec /usr/lib/rstudio-server/bin/rserver --server-daemonize 0 \
-        --auth-pam-helper-path /usr/lib/rstudio-server/bin/pam-helper
+        --server-user root
 
 %test
     set -e

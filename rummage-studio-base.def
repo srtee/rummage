@@ -70,30 +70,6 @@ EOF
     mkdir -p /etc/pam.d
     cp /usr/lib/rstudio-server/extras/pam/rstudio /etc/pam.d/rstudio
 
-    # Container auth helper for rserver's --auth-pam-helper-path
-    # protocol: read the password from stdin, exit 0 if valid. rserver
-    # drops to the rstudio-server user, so the helper cannot use `su`
-    # (needs root). It verifies the password against the account's
-    # crypt hash in /etc/shadow (python3 crypt handles yescrypt).
-    # The shadow group gets read access and rstudio-server joins it —
-    # the deb's own rserver-pam helper refuses to run standalone.
-    groupadd -f shadow
-    usermod -aG shadow rstudio-server
-    chgrp shadow /etc/shadow && chmod 640 /etc/shadow
-    cat > /usr/lib/rstudio-server/bin/pam-helper <<'EOF'
-#!/bin/bash
-set -o nounset
-IFS='' read -r password
-username="${1}"
-export HELPER_PASSWORD="$password"
-python3 - "$username" <<'PYEOF'
-import crypt, spwd, sys
-user = sys.argv[1]
-entry = spwd.getspnam(user)
-sys.exit(0 if crypt.crypt(HELPER_PASSWORD, entry.sp_pwdp) == entry.sp_pwdp else 1)
-PYEOF
-EOF
-    chmod +x /usr/lib/rstudio-server/bin/pam-helper
 
 %runscript
     # Run RStudio Server in the foreground (port from RSTUDIO_PORT build
@@ -112,8 +88,13 @@ EOF
     if [ $# -gt 0 ]; then
         exec rstudio-server "$@"
     fi
+    # --server-user root: rserver must keep running as root for PAM
+    # password auth (pam_unix needs to read /etc/shadow). It drops
+    # privileges to the logged-in user for each session, so the IDE
+    # itself still runs unprivileged. Default (rstudio-server uid 996)
+    # cannot authenticate in containers: PAM's shadow read fails.
     exec /usr/lib/rstudio-server/bin/rserver --server-daemonize 0 \
-        --auth-pam-helper-path /usr/lib/rstudio-server/bin/pam-helper
+        --server-user root
 
 %test
     set -e
