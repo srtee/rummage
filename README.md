@@ -1,7 +1,25 @@
 # rummage
 
-Apptainer definition files for a reproducible R runtime: [uvr](https://github.com/nbafrank/uvr)
-manages the packages, Apptainer packages the whole environment into a portable SIF.
+Built on [uvr](https://github.com/nbafrank/uvr) — the fast Rust-based R
+package manager (manifest, lockfile, P3M pre-built binaries) — with
+[Apptainer](https://apptainer.org) definition files that package the
+resulting environment into a portable SIF.
+
+<details>
+<summary>Credits</summary>
+
+- **[uvr](https://github.com/nbafrank/uvr)** ([nbafrank/uvr](https://github.com/nbafrank/uvr))
+  does the actual package management: `uvr.toml` manifests, `uvr.lock`
+  lockfiles, P3M binary installs, and R version management. This repo is
+  just the container packaging around it. Go star the original.
+- **LLM-assisted development**: this codebase was written with the help of
+  [GLM-5.3-Flash](https://github.com/zai-org/GLM) served from
+  [Ollama Cloud](https://ollama.com/cloud) using the
+  [oh-my-pi](https://github.com/can1357/oh-my-pi) agent harness. All build
+  steps, container runs, and package installs were verified with real
+  executions; every claim in this README was exercised, not assumed.
+
+</details>
 
 ## What's here
 
