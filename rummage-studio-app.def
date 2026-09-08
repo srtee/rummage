@@ -1,0 +1,134 @@
+Bootstrap: localimage
+From: rummage-studio-base.sif
+
+%files
+    # Build context = the analysis project folder that owns uvr.toml.
+    # Same contract as rummage-app.def.
+    uvr.toml /opt/uvr-project/uvr.toml
+
+%arguments
+    # Comma- or space-separated CRAN package list, e.g. "terra,tidyverse".
+    # Set from the Makefile (PACKAGES=...) or directly:
+    #   apptainer build --build-arg 'PACKAGES=terra tidyverse' rummage-studio-app.sif rummage-studio-app.def
+    PACKAGES=
+    # ALL_DEPS=1: also install [dev-dependencies] from uvr.toml.
+    ALL_DEPS=
+
+%post
+    # rummage-studio-app: rummage-studio-base (R + uvr + RStudio Server);
+    # this stage bakes the package library. Identical library logic to
+    # rummage-app.def, on the studio base.
+    #
+    # Build:  make studio PACKAGES="terra,tidyverse"   (or: make studio-all-deps)
+    # Run:    apptainer run --bind "$(pwd)":/work rummage-studio-app.sif
+
+    PKG_LIST=$(echo "{{ PACKAGES }}" | tr ',' ' ')
+    mkdir -p /opt/uvr-project
+    cd /opt/uvr-project
+    if [ -n "${PKG_LIST}" ]; then
+        # Generate uvr.toml from the package list. Reject anything that is
+        # not a valid R package name — a stray quote would corrupt the TOML.
+        for p in ${PKG_LIST}; do
+            case "$p" in
+                *[!A-Za-z0-9.]*) echo "ERROR: invalid package name: $p" >&2; exit 1 ;;
+            esac
+        done
+        {
+            echo "[project]"
+            echo 'name = "studio-app"'
+            echo ""
+            echo "[dependencies]"
+            for p in ${PKG_LIST}; do
+                printf '%s = "*"\n' "$p"
+            done
+        } > uvr.toml
+    elif [ ! -f uvr.toml ]; then
+        echo "ERROR: PACKAGES is empty and no uvr.toml in the build context." >&2
+        exit 1
+    fi
+    cat uvr.toml
+
+    # `uvr lock` resolves uvr.toml against the base image's R and writes
+    # /opt/uvr-project/uvr.lock; `uvr sync --frozen` installs exactly that
+    # resolution into the baked library. --install-system-deps lets uvr
+    # apt-get any system libraries its rules detect (we are root, e.g.
+    # GDAL/PROJ/GEOS for terra).
+    # Binary installs come from P3M's noble channel; a brand-new CRAN
+    # release without a noble binary yet fails the sync loudly — rerun the
+    # build a day later or pin the package version in uvr.toml.
+    export UVR_LIBRARY=/opt/uvr-r/library
+    uvr lock
+    NO_DEV_FLAG=--no-dev
+    if [ -n "{{ ALL_DEPS }}" ]; then
+        # ALL_DEPS=1: install [dependencies] AND [dev-dependencies].
+        NO_DEV_FLAG=
+    fi
+    uvr sync --frozen ${NO_DEV_FLAG} --install-system-deps
+
+    # Drop uvr's build-time download cache — the library is baked.
+    rm -rf /root/.uvr
+
+%environment
+    export UVR_LIBRARY=/opt/uvr-r/library
+    export R_LIBS_USER=/opt/uvr-r/library
+    # uvr's `run` isolation hides site libraries; this restores visibility
+    # of the baked library for `uvr run ...`.
+    export UVR_EXTRA_LIBS=/opt/uvr-r/library
+
+%runscript
+    # Run RStudio Server in the foreground on port 8787. The project is
+    # bind-mounted at /work and becomes the default session directory.
+    #
+    #   apptainer run --bind "$(pwd)":/work rummage-studio-app.sif
+    #   → http://localhost:8787  (user: studio, password: studio)
+    #
+    # Writable state dirs are REQUIRED — the SIF's /var is read-only:
+    #   --bind /tmp/rstudio-state:/var/lib/rstudio-server \
+    #   --bind /tmp/rstudio-state:/var/log/rstudio-server \
+    #   --bind /tmp/rstudio-state:/var/run/rstudio-server \
+    #   --writable-tmpfs
+    if [ $# -gt 0 ]; then
+        exec rstudio-server "$@"
+    fi
+    exec /usr/lib/rstudio-server/bin/rserver --server-daemonize 0 \
+        --auth-pam-helper-path /usr/lib/rstudio-server/bin/pam-helper
+
+%test
+    set -e
+    echo "uvr: $(uvr --version)"
+    echo "R:   $(Rscript -e 'cat(R.version.string)')"
+    echo "RStudio Server: $(rstudio-server version)"
+    echo "Baked packages: $(Rscript -e 'cat(nrow(installed.packages(lib.loc="/opt/uvr-r/library")))')"
+
+%labels
+    Author APSIM Initiative
+    Title rummage studio application runtime
+    Description R + uvr + RStudio Server with a baked package library; bind working dir at exec time
+    Version 1.0
+
+%help
+    rummage-studio-app ("rummage-studio-app.sif")
+    =============================================
+    Built FROM rummage-studio-base.sif (R + uvr + RStudio Server). Adds a
+    package library baked at build time from the PACKAGES build arg or
+    the uvr.toml in the build context. Packages install from P3M
+    pre-built binaries (noble channel); system deps are installed by
+    uvr's --install-system-deps. The generated uvr.lock lives at
+    /opt/uvr-project/uvr.lock.
+
+    BUILD (requires rummage-studio-base.sif in the current directory):
+      make studio PACKAGES="terra,tidyverse,ggplot2"
+      # or with everything from uvr.toml (incl. dev-dependencies):
+      make studio-all-deps
+      # or directly:
+      apptainer build --build-arg 'PACKAGES=terra,tidyverse' \
+          rummage-studio-app.sif rummage-studio-app.def
+
+    RUN (RStudio Server on port 8787, working dir at /work):
+      apptainer run --bind "$(pwd)":/work rummage-studio-app.sif
+      → http://localhost:8787   login: studio / studio
+
+    Extract the lockfile (the detailed record of what was resolved):
+      apptainer exec rummage-studio-app.sif cat /opt/uvr-project/uvr.lock > uvr.lock
+
+    The library and R are read-only inside the SIF.

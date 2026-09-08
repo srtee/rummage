@@ -1,0 +1,150 @@
+Bootstrap: localimage
+From: rummage-base.sif
+
+%arguments
+    # Server port. 8787 is the RStudio default but often collides with
+    # host services (Apptainer shares the host network namespace);
+    # 18787 is a safe default. Override with RSTUDIO_PORT=8787.
+    RSTUDIO_PORT=18787
+    # RStudio Server version: "latest" = current stable from rstudio.org;
+    # or an exact version like 2026.08.2-200 (debs use "-" for "+").
+    RSTUDIO_VERSION=latest
+
+%post
+    # rummage-studio-base: rummage-base (R + uvr) + RStudio Server.
+    # The RStudio Server Open Source edition (AGPL) runs as a web app on
+    # port 8787; users log in with a container-side account. No R packages
+    # are installed here — rummage-studio-app.def builds on this image.
+    #
+    # Build:  make studio-base
+
+    export DEBIAN_FRONTEND=noninteractive
+    export LC_ALL=C.UTF-8
+
+    apt-get update -q && \
+        apt-get install -yq --no-install-recommends \
+            gdebi-core libclang-dev libssl-dev psmisc sudo wget && \
+        rm -rf /var/lib/apt/lists/*
+
+    # ---- RStudio Server --------------------------------------------------
+    # The jammy deb works on noble (rocker does the same substitution);
+    # gdebi resolves the deb's Depends (libssl-dev, libclang-dev, ...).
+    RSTUDIO_VERSION="{{ RSTUDIO_VERSION }}"
+    if [ "${RSTUDIO_VERSION}" = "latest" ]; then
+        DEB_URL="https://rstudio.org/download/latest/stable/server/jammy/rstudio-server-latest-amd64.deb"
+    else
+        DEB_URL="https://download2.rstudio.org/server/jammy/amd64/rstudio-server-${RSTUDIO_VERSION}-amd64.deb"
+    fi
+    wget -q "${DEB_URL}" -O /tmp/rstudio-server.deb
+    gdebi --non-interactive /tmp/rstudio-server.deb
+    ln -fs /usr/lib/rstudio-server/bin/rstudio-server /usr/local/bin
+    ln -fs /usr/lib/rstudio-server/bin/rserver /usr/local/bin
+
+    # Point RStudio at the R on PATH (CRAN apt or Posit /opt/R build) and
+    # use advisory file locks so the SIF's read-only /usr is safe.
+    R_BIN="$(which R)"
+    mkdir -p /etc/rstudio /etc/R
+    cat > /etc/rstudio/logging.conf <<'EOF'
+[*]
+log-level=warn
+logger-type=syslog
+EOF
+    {
+        echo "rsession-which-r=${R_BIN}"
+        echo "www-port={{ RSTUDIO_PORT }}"
+    } > /etc/rstudio/rserver.conf
+    echo "lock-type=advisory" > /etc/rstudio/file-locks
+
+    # Session user: created at build so it exists even without s6-style
+    # init. Password "studio" — PAM rejects a locked password, so the
+    # account MUST have one. Passwordless sudo inside the container
+    # (typical for single-user container RStudio; uvr needs it for
+    # system deps).
+    useradd -m -s /bin/bash -u 10001 studio || true
+    echo "studio:studio" | chpasswd
+    echo "studio ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/studio
+    chmod 0440 /etc/sudoers.d/studio
+
+    # The deb ships a PAM template but does not install it in containers;
+    # without /etc/pam.d/rstudio the login always fails.
+    mkdir -p /etc/pam.d
+    cp /usr/lib/rstudio-server/extras/pam/rstudio /etc/pam.d/rstudio
+
+    # Container auth helper for rserver's --auth-pam-helper-path
+    # protocol: read the password from stdin, exit 0 if valid. rserver
+    # drops to the rstudio-server user, so the helper cannot use `su`
+    # (needs root). It verifies the password against the account's
+    # crypt hash in /etc/shadow (python3 crypt handles yescrypt).
+    # The shadow group gets read access and rstudio-server joins it —
+    # the deb's own rserver-pam helper refuses to run standalone.
+    groupadd -f shadow
+    usermod -aG shadow rstudio-server
+    chgrp shadow /etc/shadow && chmod 640 /etc/shadow
+    cat > /usr/lib/rstudio-server/bin/pam-helper <<'EOF'
+#!/bin/bash
+set -o nounset
+IFS='' read -r password
+username="${1}"
+export HELPER_PASSWORD="$password"
+python3 - "$username" <<'PYEOF'
+import crypt, spwd, sys
+user = sys.argv[1]
+entry = spwd.getspnam(user)
+sys.exit(0 if crypt.crypt(HELPER_PASSWORD, entry.sp_pwdp) == entry.sp_pwdp else 1)
+PYEOF
+EOF
+    chmod +x /usr/lib/rstudio-server/bin/pam-helper
+
+%runscript
+    # Run RStudio Server in the foreground (port from RSTUDIO_PORT build
+    # arg, default 18787).
+    #
+    # Writable state binds are REQUIRED — the SIF's /var is read-only:
+    #   apptainer run --bind "$(pwd)":/work \
+    #       --bind /tmp/rstudio-state:/var/lib/rstudio-server \
+    #       --bind /tmp/rstudio-state:/var/log/rstudio-server \
+    #       --bind /tmp/rstudio-state:/var/run/rstudio-server \
+    #       --writable-tmpfs \
+    #       rummage-studio-base.sif
+    #   → http://localhost:8787  (user: studio, password: studio)
+    #
+    # Any args are passed through to rstudio-server (e.g. "version").
+    if [ $# -gt 0 ]; then
+        exec rstudio-server "$@"
+    fi
+    exec /usr/lib/rstudio-server/bin/rserver --server-daemonize 0 \
+        --auth-pam-helper-path /usr/lib/rstudio-server/bin/pam-helper
+
+%test
+    set -e
+    echo "uvr: $(uvr --version)"
+    echo "R:   $(Rscript -e 'cat(R.version.string)')"
+    echo "RStudio Server: $(rstudio-server version)"
+
+%labels
+    Author APSIM Initiative
+    Title uvr + R + RStudio Server base runtime
+    Description rummage-base plus RStudio Server (port 8787, user studio); packages added by rummage-studio-app.def
+    Version 1.0
+
+%help
+    rummage-studio-base ("rummage-studio-base.sif")
+    ===============================================
+    rummage-base (Ubuntu 24.04 + R + uvr) + RStudio Server Open Source.
+    No R packages — build rummage-studio-app.sif from it to bake a
+    package library.
+
+    BUILD:
+      make studio-base
+
+    RUN (RStudio Server on port 8787, project bound at /work):
+      apptainer run --bind "$(pwd)":/work \
+          --bind /tmp/rstudio-state:/var/lib/rstudio-server \
+          --bind /tmp/rstudio-state:/var/log/rstudio-server \
+          --bind /tmp/rstudio-state:/var/run/rstudio-server \
+          --writable-tmpfs \
+          rummage-studio-base.sif
+      → http://localhost:8787   login: studio / studio
+
+    Version pinning:
+      make studio-base RSTUDIO_VERSION=2026.08.2-200
