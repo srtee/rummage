@@ -23,8 +23,7 @@ From: rummage-base.sif
 
     apt-get update -q && \
         apt-get install -yq --no-install-recommends \
-            gdebi-core libclang-dev libssl-dev psmisc sudo wget && \
-        rm -rf /var/lib/apt/lists/*
+            gdebi-core libclang-dev libssl-dev psmisc sudo wget
 
     # ---- RStudio Server --------------------------------------------------
     # The jammy deb works on noble (rocker does the same substitution);

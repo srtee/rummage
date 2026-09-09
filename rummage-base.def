@@ -27,8 +27,7 @@ From: ubuntu:24.04
     # ---- base OS packages ----------------------------------------------
     apt-get update -q && \
         apt-get install -yq --no-install-recommends \
-            ca-certificates curl wget git fontconfig gnupg locales tzdata \
-            software-properties-common lsb-release
+            ca-certificates curl wget git fontconfig gnupg locales tzdata
 
     # ---- locale + timezone ----------------------------------------------
     sed -i "s/^# *${IMAGE_LOCALE}/${IMAGE_LOCALE}/" /etc/locale.gen

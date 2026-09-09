@@ -71,6 +71,8 @@ From: rummage-studio-base.sif
 
     # Drop uvr's build-time download cache — the library is baked.
     rm -rf /root/.uvr
+    # Drop apt-lists (only here, not in studio-base)    
+    rm -rf /var/lib/apt/lists/*
 
 %environment
     export UVR_LIBRARY=/opt/uvr-r/library
