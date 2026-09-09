@@ -1,6 +1,16 @@
 Bootstrap: localimage
 From: rummage-base.sif
 
+%setup
+    # PACKAGES mode needs no manifest, but %files still copies uvr.toml
+    # unconditionally and the build dies before %post can react. Touch a
+    # placeholder when PACKAGES is set and none exists in the build
+    # context — %post overwrites it from PACKAGES. PACKAGES empty + no
+    # real uvr.toml still fails correctly in %post.
+    if [ -n "{{ PACKAGES }}" ] && [ ! -f uvr.toml ]; then
+        touch uvr.toml
+    fi
+
 %files
     # Build context = the analysis project folder that owns uvr.toml.
     # uvr.toml IS the environment spec: uvr resolves it at build time and
@@ -90,9 +100,13 @@ From: rummage-base.sif
     cd /work || exit 1
 
     # Reconcile the lockfile: copy the baked one out if absent, warn on
-    # mismatch (the image remains the environment spec), stay silent on match.
+    # mismatch (the image remains the environment spec), stay silent on
+    # match. `uvr lock` bakes the lockfile 0600; a plain cp preserves
+    # that mode, leaving the file unreadable/unwritable by non-root
+    # users. Normalize to 644 (read-only for non-root: the container is
+    # not intended for modifying the lockfile).
     if [ ! -f uvr.lock ]; then
-        cp /opt/uvr-project/uvr.lock uvr.lock
+        install -m 644 /opt/uvr-project/uvr.lock uvr.lock
     elif ! cmp -s uvr.lock /opt/uvr-project/uvr.lock; then
         echo "WARNING: uvr.lock in /work differs from the environment baked into this image." >&2
     fi
