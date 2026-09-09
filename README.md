@@ -73,9 +73,9 @@ apptainer build --fakeroot --build-arg 'PACKAGES=terra ggplot2' \
 
 Notes:
 
-- `PACKAGES` accepts comma- or space-separated names. **Commas are converted
-  to spaces by the Makefile** — `apptainer build --build-arg` itself splits
-  values on commas, so a direct invocation must use spaces.
+- `PACKAGES` accepts comma- or space-separated names — both spellings
+  work identically, through the Makefile or a direct
+  `apptainer build --build-arg` invocation.
 - Default (no `--build-arg`s) is latest: R from the CRAN Ubuntu apt repo
   (`noble-cran40`, current 4.x line, with the matching `r-base-dev`
   toolchain) and the latest uvr release. Two builds of the same def can
@@ -131,6 +131,28 @@ make studio-run
 #   → http://localhost:18787   login: studio / studio
 make studio-stop                          # shut it down
 ```
+
+Or run directly (the flags below are REQUIRED — `--fakeroot` because
+rserver must run as root for PAM auth; the state binds because the SIF's
+`/var` is read-only):
+
+```sh
+mkdir -p /tmp/rstudio-state
+apptainer run --fakeroot \
+    --bind "$(pwd)":/work \
+    --bind /tmp/rstudio-state:/var/lib/rstudio-server \
+    --bind /tmp/rstudio-state:/var/log/rstudio-server \
+    --bind /tmp/rstudio-state:/var/run/rstudio-server \
+    --writable-tmpfs \
+    rummage-studio-app.sif
+```
+
+rserver logs to syslog, so this stays silent on success — confirm the
+server is up with `ss -ltn | grep 18787`, then open the URL. Starting it
+without `--fakeroot` fails with *"Attempt to run server as user 'root'
+... without privilege"*; starting without the state binds fails with
+*"system error 30 (Read-only file system) [path: /var/run/rstudio-server
+...]"*.
 
 Notes:
 

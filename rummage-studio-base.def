@@ -13,7 +13,7 @@ From: rummage-base.sif
 %post
     # rummage-studio-base: rummage-base (R + uvr) + RStudio Server.
     # The RStudio Server Open Source edition (AGPL) runs as a web app on
-    # port 8787; users log in with a container-side account. No R packages
+    # port 18787; users log in with a container-side account. No R packages
     # are installed here — rummage-studio-app.def builds on this image.
     #
     # Build:  make studio-base
@@ -76,13 +76,13 @@ EOF
     # arg, default 18787).
     #
     # Writable state binds are REQUIRED — the SIF's /var is read-only:
-    #   apptainer run --bind "$(pwd)":/work \
+    #   apptainer run --fakeroot --bind "$(pwd)":/work \
     #       --bind /tmp/rstudio-state:/var/lib/rstudio-server \
     #       --bind /tmp/rstudio-state:/var/log/rstudio-server \
     #       --bind /tmp/rstudio-state:/var/run/rstudio-server \
     #       --writable-tmpfs \
     #       rummage-studio-base.sif
-    #   → http://localhost:8787  (user: studio, password: studio)
+    #   → http://localhost:18787  (user: studio, password: studio)
     #
     # Any args are passed through to rstudio-server (e.g. "version").
     if [ $# -gt 0 ]; then
@@ -105,7 +105,7 @@ EOF
 %labels
     Author APSIM Initiative
     Title uvr + R + RStudio Server base runtime
-    Description rummage-base plus RStudio Server (port 8787, user studio); packages added by rummage-studio-app.def
+    Description rummage-base plus RStudio Server (port 18787, user studio); packages added by rummage-studio-app.def
     Version 1.0
 
 %help
@@ -118,14 +118,14 @@ EOF
     BUILD:
       make studio-base
 
-    RUN (RStudio Server on port 8787, project bound at /work):
-      apptainer run --bind "$(pwd)":/work \
+    RUN (RStudio Server on port 18787, project bound at /work):
+      apptainer run --fakeroot --bind "$(pwd)":/work \
           --bind /tmp/rstudio-state:/var/lib/rstudio-server \
           --bind /tmp/rstudio-state:/var/log/rstudio-server \
           --bind /tmp/rstudio-state:/var/run/rstudio-server \
           --writable-tmpfs \
           rummage-studio-base.sif
-      → http://localhost:8787   login: studio / studio
+      → http://localhost:18787   login: studio / studio
 
     Version pinning:
       make studio-base RSTUDIO_VERSION=2026.08.2-200
