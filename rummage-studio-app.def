@@ -78,7 +78,14 @@ From: rummage-studio-base.sif
         NO_DEV_FLAG=
     fi
     uvr sync --frozen ${NO_DEV_FLAG} --install-system-deps
-    uvr activate
+    # RStudio sessions don't inherit rserver's environment. The supported
+    # knobs for the session library are:
+    #   - `r-libs-user` in /etc/rstudio/rsession.conf (session-level)
+    #   - /etc/R/Renviron.site (R reads it at startup in any context)
+    cat >> /etc/rstudio/rsession.conf <<'EOF'
+r-libs-user=/opt/uvr-r/library
+EOF
+    echo 'R_LIBS_USER=/opt/uvr-r/library' >> /etc/R/Renviron.site
 
     # Drop uvr's build-time download cache — the library is baked.
     rm -rf /root/.uvr
@@ -120,20 +127,43 @@ From: rummage-studio-base.sif
     fi
     cd /work || exit 1
 
-    # Reconcile the lockfile: copy the baked one out if absent, warn on
+    # Reconcile toml and lockfile: copy the baked one out if absent, warn on
     # mismatch (the image remains the environment spec), stay silent on
     # match. `uvr lock` bakes the lockfile 0600; a plain cp preserves
     # that mode, leaving the file unreadable by non-root users (e.g.
     # the studio RStudio session). Normalize to 644 (read-only for
     # non-root: the container is not intended for modifying the
-    # lockfile).
+    # lockfile). A pre-existing host-owned copy may also be unreadable
+    # (e.g. 0600 from a root-run build), so chmod both branches.
+    if [ ! -f uvr.toml ]; then
+        install -m 644 /opt/uvr-project/uvr.toml uvr.toml
+    else
+        chmod 644 uvr.toml
+        cmp -s uvr.toml /opt/uvr-project/uvr.toml || \
+            echo "WARNING: uvr.toml in /work differs from the environment baked into this image." >&2
+    fi
+
     if [ ! -f uvr.lock ]; then
         install -m 644 /opt/uvr-project/uvr.lock uvr.lock
-    elif ! cmp -s uvr.lock /opt/uvr-project/uvr.lock; then
-        echo "WARNING: uvr.lock in /work differs from the environment baked into this image." >&2
+    else
+        chmod 644 uvr.lock
+        cmp -s uvr.lock /opt/uvr-project/uvr.lock || \
+            echo "WARNING: uvr.lock in /work differs from the environment baked into this image." >&2
     fi
-    
-    . /opt/uvr-project/.uvr/activate # needed for rstudio
+
+    # Session records: RStudio writes .Rhistory/.RData (and .Rproj.user/)
+    # into the session cwd on exit. Keep them root-owned but 666 so ANY
+    # writer can save — host user, container root, and the container's
+    # studio user alike — and so repeat runs inherit whatever the
+    # previous run left. Absent files are created empty; present files
+    # (even unreadable host copies) are chmod'ed in place.
+    for f in .Rhistory .RData; do
+        if [ -f "$f" ]; then
+            chmod 666 "$f"
+        else
+            install -m 666 /dev/null "$f"
+        fi
+    done
 
     if [ $# -gt 0 ]; then
         exec rstudio-server "$@"

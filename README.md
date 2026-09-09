@@ -175,6 +175,32 @@ Notes:
 - Same pinning as the non-studio images: `R_VERSION`, `UVR_VERSION` at
   build; plus `RSTUDIO_VERSION` (`latest` or e.g. `2026.08.2-200`).
 
+### Sessions and files in /work (studio)
+
+RStudio sessions don't inherit the server's environment, so the image
+sets the library path for every session via `r-libs-user` in
+`/etc/rstudio/rsession.conf` and `R_LIBS_USER` in `/etc/R/Renviron.site`.
+The baked library is active in the IDE out of the box — no activation
+step.
+
+At startup the runscript also prepares `/work`:
+
+- `uvr.toml` / `uvr.lock`: copied out if absent; existing copies are
+  chmod'ed 644 if unreadable. Warns if the copy differs from what's
+  baked into the image (the image remains the environment spec).
+- `.Rhistory` / `.RData`: created empty if absent; existing copies are
+  chmod'ed 666. RStudio writes session records here, and a file the
+  container can't write would silently kill history and session
+  restore. 666 means any writer can save — host user, container root,
+  the container's `studio` user — which also covers repeat runs
+  picking up where the last one left off.
+
+**Caveat**: the 666 chmod applies to files on your host through the
+`/work` bind. Fine for a single-user project directory; if you bind a
+directory shared with other people, every local user on the host can
+write your `.Rhistory`/`.RData`. Bind a private directory, or set the
+modes yourself afterwards.
+
 ## Example
 
 ```sh
