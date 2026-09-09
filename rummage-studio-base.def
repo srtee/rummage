@@ -40,8 +40,8 @@ From: rummage-base.sif
     ln -fs /usr/lib/rstudio-server/bin/rstudio-server /usr/local/bin
     ln -fs /usr/lib/rstudio-server/bin/rserver /usr/local/bin
 
-    # Point RStudio at the R on PATH (CRAN apt or Posit /opt/R build) and
-    # use advisory file locks so the SIF's read-only /usr is safe.
+    # Point RStudio at the R on PATH (CRAN apt repo install) and use
+    # advisory file locks so the SIF's read-only /usr is safe.
     R_BIN="$(which R)"
     mkdir -p /etc/rstudio /etc/R
     cat > /etc/rstudio/logging.conf <<'EOF'

@@ -3,7 +3,8 @@ From: ubuntu:24.04
 
 %arguments
     # Build args. Unset = latest R (CRAN apt repo, current 4.x line) and
-    # latest uvr release. Pin with:
+    # latest uvr release. R_VERSION pins a specific R release (e.g.
+    # 4.5.1), resolved to the newest matching deb in the CRAN repo. Pin with:
     #   apptainer build --build-arg R_VERSION=4.5.1 --build-arg UVR_VERSION=v0.4.6 \
     #       rummage-base.sif rummage-base.def
     R_VERSION=
@@ -35,28 +36,40 @@ From: ubuntu:24.04
     ln -sf "/usr/share/zoneinfo/${IMAGE_TZ}" /etc/localtime
     echo "${IMAGE_TZ}" > /etc/timezone
     # ---- R ---------------------------------------------------------------
+    # Both branches install R from the CRAN Ubuntu apt repo
+    # (https://cran.r-project.org/bin/linux/ubuntu/), so the compiler
+    # toolchain (r-base-dev) always matches the installed R — source
+    # fallbacks like terra compile cleanly.
+    CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME}")"
+    wget -qO /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc \
+        https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc
+    echo "deb https://cloud.r-project.org/bin/linux/ubuntu ${CODENAME}-cran40/" \
+        > /etc/apt/sources.list.d/cran-r.list
+    apt-get update -qq
     PINNED_R_VERSION="{{ R_VERSION }}"
     if [ -n "${PINNED_R_VERSION}" ]; then
-        # Pinned R: Posit prebuilt deb into /opt/R/$PINNED_R_VERSION (all
-        # recommended packages bundled, headers included — no r-base-dev).
-        R_DEB_URL="https://cdn.posit.co/r/ubuntu-2404/pkgs/r-${PINNED_R_VERSION}_1_amd64.deb"
-        curl -fsSL "${R_DEB_URL}" -o /tmp/r-pinned.deb
-        apt-get install -yq --no-install-recommends /tmp/r-pinned.deb
-        rm -f /tmp/r-pinned.deb
-        ln -s "/opt/R/${PINNED_R_VERSION}/bin/R" /usr/local/bin/R
-        ln -s "/opt/R/${PINNED_R_VERSION}/bin/Rscript" /usr/local/bin/Rscript
-        R --version | head -1
+        # Pin core, the metapackage, recommended, and dev to ONE exact deb
+        # version: r-base-dev's r-base-core dependency is (>= ...), so a
+        # bare ${R_VERSION}-style pin would let apt drift core to latest.
+        # The repo index carries every historical point release; pick the
+        # newest deb matching ${R_VERSION}.*.
+        PIN_APT_VERSION="$(apt-cache madison r-base-core \
+            | grep -E "\| ${PINNED_R_VERSION}-" | awk '{print $3}' | sort -rV | head -1)"
+        if [ -z "${PIN_APT_VERSION}" ]; then
+            echo "ERROR: R ${PINNED_R_VERSION} not found in the CRAN ${CODENAME}-cran40 repo." >&2
+            echo "Available r-base-core versions:" >&2
+            apt-cache madison r-base-core | awk '{print "  " $3}' >&2
+            exit 1
+        fi
+        apt-get install -yq --no-install-recommends \
+            "r-base=${PIN_APT_VERSION}" \
+            "r-base-core=${PIN_APT_VERSION}" \
+            "r-recommended=${PIN_APT_VERSION}" \
+            "r-base-dev=${PIN_APT_VERSION}"
     else
-        # Latest R: CRAN Ubuntu repo per the official instructions
-        # (https://cran.r-project.org/bin/linux/ubuntu/#root).
-        apt-get update -qq
-        apt-get install -yq --no-install-recommends software-properties-common dirmngr
-        wget -qO- https://cloud.r-project.org/bin/linux/ubuntu/marutter_pubkey.asc \
-            | tee -a /etc/apt/trusted.gpg.d/cran_ubuntu_key.asc
-        add-apt-repository "deb https://cloud.r-project.org/bin/linux/ubuntu $(lsb_release -cs)-cran40/"
-        apt-get install -yq --no-install-recommends r-base
-        R --version | head -1
+        apt-get install -yq --no-install-recommends r-base r-base-dev
     fi
+    R --version | head -1
 
     # ---- uvr binary -------------------------------------------------------
     PINNED_UVR_VERSION="{{ UVR_VERSION }}"
@@ -91,9 +104,9 @@ From: ubuntu:24.04
 %help
     uvr + R base image ("rummage-base")
     ===================================
-    Ubuntu 24.04 + R (latest from the CRAN apt repo, or a pinned Posit
-    build) + the uvr binary. This image has NO R packages — build
-    rummage-app.sif from it to bake a package library.
+    Ubuntu 24.04 + R (latest, or a pinned release, from the CRAN apt
+    repo; r-base-dev toolchain included) + the uvr binary. This image
+    has NO R packages — build rummage-app.sif from it to bake a library.
 
     Version pinning (both optional, default = latest):
       apptainer build --build-arg R_VERSION=4.5.1 --build-arg UVR_VERSION=v0.4.6 \

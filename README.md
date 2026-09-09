@@ -77,17 +77,20 @@ Notes:
   to spaces by the Makefile** — `apptainer build --build-arg` itself splits
   values on commas, so a direct invocation must use spaces.
 - Default (no `--build-arg`s) is latest: R from the CRAN Ubuntu apt repo
-  (`noble-cran40`, current 4.x line) and the latest uvr release. Two builds
-  of the same def can therefore differ — the generated `uvr.lock` (below) is
-  the actual reproducibility record.
+  (`noble-cran40`, current 4.x line, with the matching `r-base-dev`
+  toolchain) and the latest uvr release. Two builds of the same def can
+  therefore differ — the generated `uvr.lock` (below) is the actual
+  reproducibility record.
 - `--build-arg` flags must come **before** the positional `IMAGE PATH`
   `BUILD SPEC` arguments.
 
 ### Pinned R installs
 
-When `R_VERSION` is set, R comes from a Posit prebuilt deb into
-`/opt/R/<version>` (all recommended packages and headers bundled; no
-`r-base-dev` needed). When unset, R comes from the CRAN apt repo.
+R always comes from the CRAN Ubuntu apt repo. When `R_VERSION` is set, the
+build resolves the newest matching deb in the repo index and pins
+`r-base-core`, `r-base`, `r-recommended`, and `r-base-dev` to that exact
+version — so the compiler toolchain always matches the pinned R. When
+unset, latest R installs (`r-base` + `r-base-dev`).
 
 ## Running
 
