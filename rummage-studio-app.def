@@ -81,7 +81,6 @@ From: rummage-studio-base.sif
     # of the baked library for `uvr run ...`.
     export UVR_EXTRA_LIBS=/opt/uvr-r/library
 
-%runscript
     # Run RStudio Server in the foreground (port from the RSTUDIO_PORT
     # build arg, default 18787). The project is bind-mounted at /work and
     # becomes the default session directory.
@@ -99,6 +98,24 @@ From: rummage-studio-base.sif
     #       --writable-tmpfs \
     #       rummage-studio-app.sif
     #   → http://localhost:18787  (user: studio, password: studio)
+
+    # /work is the default working directory: bind-mount the project there.
+    if [ ! -d /work ]; then
+        echo "ERROR: /work not found." >&2
+        echo "Bind-mount your working directory:" >&2
+        echo "  apptainer run --bind \"\$(pwd)\":/work rummage-studio-app.sif" >&2
+        exit 1
+    fi
+    cd /work || exit 1
+
+    # Reconcile the lockfile: copy the baked one out if absent, warn on
+    # mismatch (the image remains the environment spec), stay silent on match.
+    if [ ! -f uvr.lock ]; then
+        cp /opt/uvr-project/uvr.lock uvr.lock
+    elif ! cmp -s uvr.lock /opt/uvr-project/uvr.lock; then
+        echo "WARNING: uvr.lock in /work differs from the environment baked into this image." >&2
+    fi
+
     if [ $# -gt 0 ]; then
         exec rstudio-server "$@"
     fi
@@ -149,6 +166,13 @@ From: rummage-studio-base.sif
           rummage-studio-app.sif
       → http://localhost:18787   login: studio / studio
       (rserver logs to syslog — confirm startup with `ss -ltn | grep 18787`)
+
+    At startup the runscript cds into /work and reconciles uvr.lock
+    (copies the baked one out if absent, warns if it differs). New R
+    sessions open in /work via rsession.conf's
+    session-default-working-dir; UVR_LIBRARY/R_LIBS_USER come from the
+    image %environment and are inherited by every session, so uvr's
+    baked library is active in the IDE out of the box.
 
     Extract the lockfile (the detailed record of what was resolved):
       apptainer exec rummage-studio-app.sif cat /opt/uvr-project/uvr.lock > uvr.lock

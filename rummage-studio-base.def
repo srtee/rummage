@@ -54,6 +54,12 @@ EOF
     } > /etc/rstudio/rserver.conf
     echo "lock-type=advisory" > /etc/rstudio/file-locks
 
+    # New R sessions must open in /work (the bind-mounted project dir),
+    # not the user's home: rsession's cwd does NOT inherit from the
+    # runscript's `cd /work` — rserver spawns rsession fresh at login,
+    # defaulting to ~. This is the supported knob (rsession.conf).
+    echo "session-default-working-dir=/work" > /etc/rstudio/rsession.conf
+
     # Session user: created at build so it exists even without s6-style
     # init. Password "studio" — PAM rejects a locked password, so the
     # account MUST have one. Passwordless sudo inside the container
