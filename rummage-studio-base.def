@@ -108,7 +108,7 @@ EOF
     echo "RStudio Server: $(rstudio-server version)"
 
 %labels
-    Author APSIM Initiative
+    Author Shern Ren Tee
     Title uvr + R + RStudio Server base runtime
     Description rummage-base plus RStudio Server (port 18787, user studio); packages added by rummage-studio-app.def
     Version 1.0

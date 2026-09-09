@@ -132,7 +132,7 @@ From: rummage-studio-base.sif
     echo "Baked packages: $(Rscript -e 'cat(nrow(installed.packages(lib.loc="/opt/uvr-r/library")))')"
 
 %labels
-    Author APSIM Initiative
+    Author Shern Ren Tee
     Title rummage studio application runtime
     Description R + uvr + RStudio Server with a baked package library; bind working dir at exec time
     Version 1.0

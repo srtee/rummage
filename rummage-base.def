@@ -96,7 +96,7 @@ From: ubuntu:24.04
     echo "R locale/TZ: $(Rscript -e 'cat(Sys.getlocale("LC_TIME"), "|", format(Sys.time(), "%Z %z"))')"
 
 %labels
-    Author APSIM Initiative
+    Author Shern Ren Tee
     Title uvr + R base runtime
     Description Ubuntu 24.04 + R + uvr binary; package library added by rummage-app.def
     Version 1.0
