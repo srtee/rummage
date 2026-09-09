@@ -81,6 +81,7 @@ From: rummage-studio-base.sif
     # of the baked library for `uvr run ...`.
     export UVR_EXTRA_LIBS=/opt/uvr-r/library
 
+%runscript
     # Run RStudio Server in the foreground (port from the RSTUDIO_PORT
     # build arg, default 18787). The project is bind-mounted at /work and
     # becomes the default session directory.
