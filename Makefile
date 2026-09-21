@@ -72,20 +72,18 @@ studio-all-deps: $(STUDIO_APP_SIF)
 	apptainer build --fakeroot --force --build-arg 'PACKAGES=' \
 	    --build-arg ALL_DEPS=1 $(STUDIO_APP_SIF) $(STUDIO_APP_DEF)
 
-# Start RStudio Server as a persistent instance (needs --fakeroot:
-# rserver must stay root for PAM auth). State dirs must be writable
-# binds — the SIF's /var is read-only. Stop with `make studio-stop`.
+# Start RStudio Server as a persistent instance. No --fakeroot: rserver
+# runs as the invoking user (--server-user $(whoami) in the runscript).
+# State dirs use --scratch — the SIF's /var is read-only. Stop with
+# `make studio-stop`.
 studio-run:
-	apptainer instance start --fakeroot \
+	apptainer instance start \
 	    --bind "$(CURDIR)":/work \
-	    --bind /tmp/rstudio-state:/var/lib/rstudio-server \
-	    --bind /tmp/rstudio-state:/var/log/rstudio-server \
-	    --bind /tmp/rstudio-state:/var/run/rstudio-server \
-	    --writable-tmpfs \
+	    --scratch /var/lib/rstudio-server,/var/log/rstudio-server,/var/run/rstudio-server \
 	    $(STUDIO_APP_SIF) rummage-studio
 	@sleep 10
 	@echo "RStudio Server: http://localhost:$$(apptainer exec instance://rummage-studio cat /etc/rstudio/rserver.conf | grep www-port | cut -d= -f2)"
-	@echo "Login: studio / studio    Stop with: make studio-stop"
+	@echo "Logged in as $$(whoami)    Stop with: make studio-stop"
 
 studio-stop:
 	apptainer instance stop rummage-studio

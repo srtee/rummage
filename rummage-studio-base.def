@@ -13,7 +13,8 @@ From: rummage-base.sif
 %post
     # rummage-studio-base: rummage-base (R + uvr) + RStudio Server.
     # The RStudio Server Open Source edition (AGPL) runs as a web app on
-    # port 18787; users log in with a container-side account. No R packages
+    # port 18787; rserver runs as the invoking user at run time (see the
+    # runscript), so no container-side account is needed. No R packages
     # are installed here — rummage-studio-app.def builds on this image.
     #
     # Build:  make studio-base
@@ -23,7 +24,7 @@ From: rummage-base.sif
 
     apt-get update -q && \
         apt-get install -yq --no-install-recommends \
-            gdebi-core libclang-dev libssl-dev psmisc sudo wget
+            gdebi-core libclang-dev libssl-dev psmisc wget
 
     # ---- RStudio Server --------------------------------------------------
     # The jammy deb works on noble (rocker does the same substitution);
@@ -59,16 +60,9 @@ EOF
     # runscript's `cd /work` — rserver spawns rsession fresh at login,
     # defaulting to ~. This is the supported knob (rsession.conf).
     echo "session-default-working-dir=/work" > /etc/rstudio/rsession.conf
-
-    # Session user: created at build so it exists even without s6-style
-    # init. Password "studio" — PAM rejects a locked password, so the
-    # account MUST have one. Passwordless sudo inside the container
-    # (typical for single-user container RStudio; uvr needs it for
-    # system deps).
-    useradd -m -s /bin/bash -u 10001 studio || true
-    echo "studio:studio" | chpasswd
-    echo "studio ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/studio
-    chmod 0440 /etc/sudoers.d/studio
+    # rserver runs as the invoking user at run time — make the deb's
+    # database.conf readable by non-root.
+    chmod o+r /etc/rstudio/database.conf
 
     # The deb ships a PAM template but does not install it in containers;
     # without /etc/pam.d/rstudio the login always fails.
@@ -77,29 +71,25 @@ EOF
 
 
 %runscript
-    # Run RStudio Server in the foreground (port from RSTUDIO_PORT build
-    # arg, default 18787).
+    # Run RStudio Server in the foreground (--server-daemonize 0 keeps
+    # the container alive). Port from the RSTUDIO_PORT build arg,
+    # default 18787.
     #
-    # Writable state binds are REQUIRED — the SIF's /var is read-only:
-    #   apptainer run --fakeroot --bind "$(pwd)":/work \
-    #       --bind /tmp/rstudio-state:/var/lib/rstudio-server \
-    #       --bind /tmp/rstudio-state:/var/log/rstudio-server \
-    #       --bind /tmp/rstudio-state:/var/run/rstudio-server \
-    #       --writable-tmpfs \
+    # The --scratch flag is REQUIRED — the SIF's /var is read-only:
+    #   apptainer run --bind "$(pwd)":/work \
+    #       --scratch /var/lib/rstudio-server,/var/log/rstudio-server,/var/run/rstudio-server \
     #       rummage-studio-base.sif
-    #   → http://localhost:18787  (user: studio, password: studio)
+    #   → http://localhost:18787
+    #   (logged in as your own user — fine for single-user)
     #
     # Any args are passed through to rstudio-server (e.g. "version").
     if [ $# -gt 0 ]; then
         exec rstudio-server "$@"
     fi
-    # --server-user root: rserver must keep running as root for PAM
-    # password auth (pam_unix needs to read /etc/shadow). It drops
-    # privileges to the logged-in user for each session, so the IDE
-    # itself still runs unprivileged. Default (rstudio-server uid 996)
-    # cannot authenticate in containers: PAM's shadow read fails.
-    exec /usr/lib/rstudio-server/bin/rserver --server-daemonize 0 \
-        --server-user root
+    # --server-user $(whoami): rserver runs as the invoking user, so the
+    # IDE session matches the logged-in user, $HOME included.
+    # TODO: fix ubuntu's uid 1000 clash.
+    exec rserver --server-daemonize 0 --server-user $(whoami)
 
 %test
     set -e
@@ -110,7 +100,7 @@ EOF
 %labels
     Author Shern Ren Tee
     Title uvr + R + RStudio Server base runtime
-    Description rummage-base plus RStudio Server (port 18787, user studio); packages added by rummage-studio-app.def
+    Description rummage-base plus RStudio Server (port 18787, runs as the invoking user); packages added by rummage-studio-app.def
     Version 1.0
 
 %help
@@ -124,13 +114,11 @@ EOF
       make studio-base
 
     RUN (RStudio Server on port 18787, project bound at /work):
-      apptainer run --fakeroot --bind "$(pwd)":/work \
-          --bind /tmp/rstudio-state:/var/lib/rstudio-server \
-          --bind /tmp/rstudio-state:/var/log/rstudio-server \
-          --bind /tmp/rstudio-state:/var/run/rstudio-server \
-          --writable-tmpfs \
+      apptainer run --bind "$(pwd)":/work \
+          --scratch /var/lib/rstudio-server,/var/log/rstudio-server,/var/run/rstudio-server \
           rummage-studio-base.sif
-      → http://localhost:18787   login: studio / studio
+      → http://localhost:18787
+      (logged in as your own user — fine for single-user)
 
     Version pinning:
       make studio-base RSTUDIO_VERSION=2026.08.2-200

@@ -128,31 +128,24 @@ make studio-all-deps                      # everything in uvr.toml
 
 # Run as a persistent background instance:
 make studio-run
-#   → http://localhost:18787   login: studio / studio
+#   → http://localhost:18787   (logged in as your own user)
 make studio-stop                          # shut it down
 ```
 
-Or run directly (the flags below are REQUIRED — `--fakeroot` because
-rserver must run as root for PAM auth; the state binds because the SIF's
+Or run directly (the `--scratch` flag below is REQUIRED — the SIF's
 `/var` is read-only):
 
 ```sh
-mkdir -p /tmp/rstudio-state
-apptainer run --fakeroot \
-    --bind "$(pwd)":/work \
-    --bind /tmp/rstudio-state:/var/lib/rstudio-server \
-    --bind /tmp/rstudio-state:/var/log/rstudio-server \
-    --bind /tmp/rstudio-state:/var/run/rstudio-server \
-    --writable-tmpfs \
+apptainer run --bind "$(pwd)":/work \
+    --scratch /var/lib/rstudio-server,/var/log/rstudio-server,/var/run/rstudio-server \
     rummage-studio-app.sif
 ```
 
 rserver logs to syslog, so this stays silent on success — confirm the
 server is up with `ss -ltn | grep 18787`, then open the URL. Starting it
-without `--fakeroot` fails with *"Attempt to run server as user 'root'
-... without privilege"*; starting without the state binds fails with
-*"system error 30 (Read-only file system) [path: /var/run/rstudio-server
-...]"*.
+without `--scratch` fails with *"system error 30 (Read-only file system)
+[path: /var/run/rstudio-server ...]"*. Scratch state is tmpfs-backed and
+discarded when the instance stops.
 
 Notes:
 
@@ -160,15 +153,14 @@ Notes:
   (`make studio RSTUDIO_PORT=8787`). Apptainer shares the host network
   namespace, so a port already used by a host service is unavailable —
   8787 (the RStudio default) is a frequent collision.
-- **Login**: user `studio`, password `studio` (set at build). rserver runs
-  as root inside the container so PAM can authenticate against
-  `/etc/shadow`; each browser session still runs unprivileged as
-  `studio`, which has passwordless sudo inside the container.
-- **Writable state binds**: the SIF's `/var` is read-only, so `studio-run`
-  binds `/tmp/rstudio-state` over `/var/{lib,log,run}/rstudio-server` and
-  adds `--writable-tmpfs`. That directory is disposable session state;
-  if the server misbehaves after crashes, `rm -rf /tmp/rstudio-state &&
-  make studio-stop && make studio-run` resets it.
+- **Login**: none. rserver runs as the invoking user (`--server-user
+  $(whoami)` in the runscripts), so the IDE session is your own host
+  account ($HOME included); no container-side account exists. Single-user
+  by design.
+- **Scratch state**: the SIF's `/var` is read-only, so `studio-run` and
+  the direct-run command mount tmpfs scratch dirs over
+  `/var/{lib,log,run}/rstudio-server` via `--scratch`. That state is
+  ephemeral — `make studio-stop && make studio-run` resets it.
 - `make studio-run` uses `apptainer instance start`, which survives the
   calling shell — check `apptainer instance list`, stop with
   `make studio-stop`.
@@ -191,9 +183,9 @@ At startup the runscript also prepares `/work`:
 - `.Rhistory` / `.RData`: created empty if absent; existing copies are
   chmod'ed 666. RStudio writes session records here, and a file the
   container can't write would silently kill history and session
-  restore. 666 means any writer can save — host user, container root,
-  the container's `studio` user — which also covers repeat runs
-  picking up where the last one left off.
+  restore. 666 means any writer can save — your host user, root in a
+  `--fakeroot` maintenance run, or a uid left by an earlier run — which
+  also covers repeat runs picking up where the last one left off.
 
 **Caveat**: the 666 chmod applies to files on your host through the
 `/work` bind. Fine for a single-user project directory; if you bind a
